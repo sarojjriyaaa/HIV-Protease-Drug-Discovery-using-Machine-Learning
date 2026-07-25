@@ -1,0 +1,35 @@
+WEEK 4: DOCKING
+
+import os
+import pandas as pd
+folder = r"C:\Users\riyas\OneDrive\Desktop\HIV\WEEK4_DOCKING"
+results = []
+
+for file in os.listdir(folder):
+    if file.startswith("log_") and file.endswith(".txt"):
+        ligand = file.replace("log_", "").replace(".txt", "")
+        
+        with open(os.path.join(folder, file), 'r') as f:
+            for line in f:
+                if line.strip().startswith("1 "):  # best mode
+                    parts = line.split()
+                    score = float(parts[1])
+                    results.append([ligand, score])
+                    break
+
+df = pd.DataFrame(results, columns=["Ligand", "Binding Energy"])
+df = df.sort_values(by="Binding Energy")
+df.to_csv("docking_scores.csv", index=False)
+print(df.head(10))
+
+top = df.head(30)
+top.to_csv("top_30_compounds.csv", index=False)
+print(top)
+
+df["Reward"] = -df["Binding Energy"]
+df.to_csv("baseline_dataset.csv", index=False)
+print(df.head())
+
+df.to_excel("docking_scores.xlsx", index=False)
+top.to_excel("top_30_compounds.xlsx", index=False)
+df.to_excel("baseline_dataset.xlsx", index=False)
