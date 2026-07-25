@@ -1,22 +1,19 @@
-# 🧬 AI-driven Computational Drug Discovery Pipeline for HIV Protease Inhibitor Screening
+# AI-ML Computational Drug Discovery Pipeline for HIV Protease Inhibitor Screening
 
-## 📖 Project Overview
+## Project Overview
 
 This project aims to develop an end-to-end computational drug discovery pipeline for identifying potential HIV Protease inhibitors by integrating bioinformatics, cheminformatics, molecular docking, reinforcement learning, machine learning, molecular descriptor engineering, ADMET prediction, and biological interpretation.
 
 The project combines publicly available chemical databases, molecular docking simulations, reinforcement learning optimization, and predictive machine learning models to accelerate lead identification while reducing computational cost.
 
----
 
-## 🦠 Biological Background
+## Biological Background
 
 Human Immunodeficiency Virus (HIV) remains a major global health challenge. HIV Protease is an essential viral enzyme responsible for processing viral polyproteins into mature functional proteins required for viral replication.
 
 Because inhibition of HIV Protease prevents viral maturation, it has remained one of the most successful therapeutic targets for anti-HIV drug development.
 
----
-
-## 🎯 Research Objectives
+## Research Objectives
 
 - Collect and curate HIV Protease inhibitor datasets from ChEMBL and PubChem.
 - Prepare protein and ligand structures for computational analysis.
@@ -29,9 +26,7 @@ Because inhibition of HIV Protease prevents viral maturation, it has remained on
 - Analyze protein-ligand interactions.
 - Build a reproducible computational drug discovery workflow.
 
----
-
-## 🚀 Project Workflow
+## Project Workflow
 
 ### Phase 1 – Data Collection & Molecular Docking
 
@@ -78,7 +73,7 @@ Because inhibition of HIV Protease prevents viral maturation, it has remained on
 
 ---
 
-## 📊 Current Progress
+## Current Progress
 
 ✅ Literature Review
 
@@ -96,12 +91,11 @@ Because inhibition of HIV Protease prevents viral maturation, it has remained on
 
 ✅ Interaction Analysis
 
-🔄 Currently Working On:
-- Benchmarking Reinforcement Learning Algorithms (Week 13)
+Currently Working On:
+- Benchmarking Reinforcement Learning Algorithms 
 
----
 
-## 🛠️ Tools & Technologies
+##  Tools & Technologies
 
 ### Programming
 
@@ -145,21 +139,14 @@ Because inhibition of HIV Protease prevents viral maturation, it has remained on
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
-```
 data/
-docs/
 figures/
-models/
 notebooks/
 results/
-src/
-```
 
----
-
-## 📌 Future Work
+## Future Work
 
 - Molecular Descriptor Engineering
 - ADMET Prediction
@@ -168,13 +155,11 @@ src/
 - Biological Validation
 - Final Comparative Analysis
 
----
-
-## 👩‍💻 Author
+## Author
 
 **Riya Saroj**
 
-B.Tech Biotechnology
+B.Tech Biotechnology Graduate
 
 Interested in:
 
