@@ -1,0 +1,61 @@
+WEEK 3: CONVERSION OF LIGANDS TO PDBQT
+
+!pip install rdkit 
+
+from rdkit import Chem
+from rdkit.Chem import AllChem
+import pandas as pd
+
+df = pd.read_excel("SMILES_915.xlsx")
+print(df.head())
+print(df.columns)
+
+df = df[["Molecule ChEMBL ID", "Smiles"]]
+df = df.dropna(subset=["Smiles"])
+df.head()
+
+df = pd.read_excel("SMILES_915.xlsx")
+
+molecules = []
+
+for i, row in df.iterrows():
+    smi = row["Smiles"]
+    chembl = row["Molecule ChEMBL ID"]
+
+    mol = Chem.MolFromSmiles(smi)
+
+    if mol is None:
+        print("Invalid SMILES:", smi)
+        continue
+
+    mol = Chem.AddHs(mol)
+
+    # TRY TO EMBED
+    result = AllChem.EmbedMolecule(mol, randomSeed=42)
+
+    if result != 0:
+        print("Embedding failed:", chembl)
+        continue   # skip this molecule
+
+    # ONLY optimize if embedding worked
+    try:
+        AllChem.UFFOptimizeMolecule(mol)
+    except:
+        print("Optimization failed:", chembl)
+        continue
+
+    mol.SetProp("_Name", str(chembl))
+    molecules.append(mol)
+
+print("Total molecules:", len(molecules))
+
+from rdkit.Chem import SDWriter
+
+writer = SDWriter("lig.sdf")
+
+for mol in molecules:
+    writer.write(mol)
+
+writer.close()
+
+print("Done")
