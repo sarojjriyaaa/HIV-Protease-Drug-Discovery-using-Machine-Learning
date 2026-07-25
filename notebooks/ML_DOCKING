@@ -1,0 +1,147 @@
+import pandas as pd
+
+df = pd.read_csv("baseline_dataset.csv")
+df.head()
+
+import random
+class DockingEnv:
+    
+    def __init__(self, df):
+        self.df = df
+        self.n = len(df)
+    
+    def reset(self):
+        # start from random ligand
+        self.index = random.randint(0, self.n - 1)
+        state = self.df.iloc[self.index]
+        return state
+    
+    def step(self, action):
+        # action = choose ligand index
+        self.index = action
+        
+        state = self.df.iloc[self.index]
+        reward = state["Reward"]
+        
+        done = True   # one-step environment
+        
+        return state, reward, done
+
+env = DockingEnv(df)
+state = env.reset()
+print("Initial state:\n", state)
+action = random.randint(0, len(df)-1)
+next_state, reward, done = env.step(action)
+print("\nNext state:\n", next_state)
+print("\nReward:", reward)
+
+import random
+env = DockingEnv(df)
+best_reward = -999
+best_ligand = None
+
+for episode in range(50):
+    
+    state = env.reset()
+    
+    action = random.randint(0, len(df)-1)
+    
+    next_state, reward, done = env.step(action)
+    
+    if reward > best_reward:
+        best_reward = reward
+        best_ligand = next_state["Ligand"]
+    
+    print(f"Episode {episode}: Ligand {next_state['Ligand']} → Reward {reward}")
+
+print("\nBest Ligand Found:", best_ligand)
+print("Best Reward:", best_reward)
+
+import pandas as pd
+
+df = pd.read_csv("baseline_dataset.csv")
+df.head()
+top_rl = df.sort_values(by="Reward", ascending=False)
+top_rl.head(5)
+
+top_rl.head(5).to_csv("top_rl_compounds.csv", index=False)
+top30 = top_rl.head(5)
+top30["Ligand"].tolist()
+
+import os
+os.makedirs("top5_ligands", exist_ok=True)
+import shutil
+import os
+source_folder = r"C:\Users\riyas\OneDrive\Desktop\HIV\PROJECT_WORK\WEEK4_DOCKING\LIGANDS_913"
+
+for ligand in top30["Ligand"][:5]:
+    
+    src = os.path.join(source_folder, f"{ligand}.pdbqt")
+    dst = os.path.join("top5_ligands", f"{ligand}.pdbqt")
+
+    if os.path.exists(src):
+        shutil.copy(src, dst)
+
+print("Top 5 ligand files copied successfully.")
+len(os.listdir("top5_ligands"))
+os.makedirs("rl_redocking_results", exist_ok=True)
+
+import os
+import subprocess
+import pandas as pd
+
+vina_path = r"C:\$Recycle.Bin\S-1-5-21-480056941-2571567705-3667354513-1001\$RJUZTW7\vina.exe"
+protein = r"C:\Users\riyas\OneDrive\Desktop\HIV\PROJECT_WORK\WEEK4_DOCKING\9EEE.pdbqt"
+ligand_folder = "top30_ligands"
+output_folder = "rl_redocking_results"
+
+print(os.path.exists(vina_path))
+print(os.path.exists(protein))
+print(os.path.exists(ligand_folder))
+
+
+
+results = []
+
+center_x = 63.9
+center_y = 72.8
+center_z = 20.2
+
+size_x = 20
+size_y = 20
+size_z = 20
+
+for file in os.listdir(ligand_folder):
+
+    if file.endswith(".pdbqt"):
+
+        ligand_path = os.path.join(ligand_folder, file)
+
+        out_path = os.path.join(
+            output_folder,
+            file.replace(".pdbqt", "_out.pdbqt")
+        )
+
+        log_path = os.path.join(
+            output_folder,
+            file.replace(".pdbqt", "_log.txt")
+        )
+
+        command = [
+            vina_path,
+            "--receptor", protein,
+            "--ligand", ligand_path,
+            "--center_x", str(63.9),
+            "--center_y", str(72.8),
+            "--center_z", str(20.2),
+            "--size_x", str(20),
+            "--size_y", str(20),
+            "--size_z", str(20),
+            "--exhaustiveness", "1",
+            "--num_modes", "1",
+            "--out", out_path,
+            "--log", log_path
+        ]
+
+        subprocess.run(command)
+        print(f"Done docking: {file}")
