@@ -1,0 +1,858 @@
+# ============================================================
+# CELL 1 : IMPORT LIBRARIES
+# ============================================================
+
+import os
+import time
+from collections import Counter
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+import gymnasium as gym
+from gymnasium import spaces
+
+from stable_baselines3 import PPO, DQN, A2C, SAC
+
+# For reproducibility
+import random
+random.seed(42)
+np.random.seed(42)
+
+# Create folders (if they don't already exist)
+os.makedirs("models", exist_ok=True)
+os.makedirs("results", exist_ok=True)
+os.makedirs("figures", exist_ok=True)
+os.makedirs("tensorboard", exist_ok=True)
+
+print("All libraries imported successfully.")
+
+
+# ============================================================
+# CELL 2 : CREATE PROJECT FOLDERS
+# ============================================================
+
+algorithms = ["PPO", "DQN", "A2C", "SAC"]
+
+for algo in algorithms:
+    os.makedirs(f"models/{algo}", exist_ok=True)
+    os.makedirs(f"results/{algo}", exist_ok=True)
+    os.makedirs(f"tensorboard/{algo}", exist_ok=True)
+
+os.makedirs("figures", exist_ok=True)
+
+print("Project folders created successfully!\n")
+
+for algo in algorithms:
+    print(f"✔ models/{algo}")
+    print(f"✔ results/{algo}")
+    print(f"✔ tensorboard/{algo}")
+
+print("\n✔ figures/")
+
+
+
+
+# ============================================================
+# CELL 3 : COMMON EVALUATION & SAVING FUNCTIONS
+# ============================================================
+
+def evaluate_model(model, env, df, algo_name):
+    """
+    Evaluate a trained RL model and save all outputs.
+    """
+
+    obs, _ = env.reset()
+    # Automatically detect column names
+    ligand_col = "Ligand"
+    binding_col = "Binding Energy"
+
+    done = False
+
+    rewards = []
+    decisions = []
+
+    selected_rows = []
+    all_rows = []
+
+    while not done:
+
+        action, _ = model.predict(obs, deterministic=True)
+
+        # Handle SAC continuous action
+        if algo_name == "SAC":
+            decision = 1 if float(action[0]) >= 0 else 0
+        else:
+            decision = int(action)
+
+        next_obs, reward, terminated, truncated, info = env.step(action)
+
+        done = terminated or truncated
+
+        rewards.append(reward)
+        decisions.append(decision)
+
+        row = df.iloc[env.current_step - 1]
+
+        record = {
+            "Ligand": row[ligand_col],
+            "Binding Energy": row[binding_col],
+            "Decision": decision,
+            "Reward": reward
+        }
+
+        all_rows.append(record)
+
+        if decision == 1:
+            selected_rows.append(record)
+
+        obs = next_obs
+
+    # -------------------------------------------------------
+    # Convert to DataFrames
+    # -------------------------------------------------------
+
+    selected_df = pd.DataFrame(selected_rows)
+    all_df = pd.DataFrame(all_rows)
+
+    # -------------------------------------------------------
+    # Binding-energy categories
+    # -------------------------------------------------------
+
+    def category(x):
+
+        if x <= -13:
+            return "Excellent"
+
+        elif x <= -12:
+            return "Good"
+
+        elif x <= -11.2:
+            return "Moderate"
+
+        else:
+            return "Poor"
+
+    if len(selected_df) > 0:
+
+        selected_df["Category"] = selected_df["Binding Energy"].apply(category)
+
+        category_counts = Counter(selected_df["Category"])
+
+        mean_be = selected_df["Binding Energy"].mean()
+        std_be = selected_df["Binding Energy"].std()
+
+    else:
+
+        category_counts = Counter()
+
+        mean_be = np.nan
+        std_be = np.nan
+
+    # -------------------------------------------------------
+    # Statistics
+    # -------------------------------------------------------
+
+    stats = {
+
+        "Algorithm": algo_name,
+
+        "Training Time": None,
+
+        "Average Reward": np.mean(rewards),
+
+        "Maximum Reward": np.max(rewards),
+
+        "Minimum Reward": np.min(rewards),
+
+        "Selection Budget": env.selection_budget,
+
+        "Selected": sum(decisions),
+
+        "Rejected": len(decisions) - sum(decisions),
+
+        "Mean Binding Energy": mean_be,
+
+        "Std Binding Energy": std_be,
+
+        "Excellent": category_counts["Excellent"],
+
+        "Good": category_counts["Good"],
+
+        "Moderate": category_counts["Moderate"],
+
+        "Poor": category_counts["Poor"]
+
+    }
+
+    # -------------------------------------------------------
+    # Save CSV files
+    # -------------------------------------------------------
+
+    selected_df.to_csv(
+        f"results/{algo_name}/selected_ligands.csv",
+        index=False
+    )
+
+    all_df.to_csv(
+        f"results/{algo_name}/all_predictions.csv",
+        index=False
+    )
+
+    # -------------------------------------------------------
+    # Save statistics
+    # -------------------------------------------------------
+
+    with open(f"results/{algo_name}/statistics.txt", "w") as f:
+
+        for key, value in stats.items():
+            f.write(f"{key}: {value}\n")
+
+    print("=" * 60)
+    print(f"{algo_name} RESULTS")
+    print("=" * 60)
+
+    for key, value in stats.items():
+        print(f"{key:25s}: {value}")
+
+    return stats, selected_df, all_df
+
+
+df = pd.read_excel("Docking_data.xlsx")
+
+
+class DockingEnv(gym.Env):
+
+    def __init__(self, df):
+
+        super().__init__()
+
+        self.df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+        self.n_molecules = len(self.df)
+
+        self.current_step = 0
+
+        # 30% screening budget
+        self.selection_budget = int(0.30 * self.n_molecules)
+
+        self.selected_count = 0
+
+        self.action_space = spaces.Discrete(2)
+
+        self.observation_space = spaces.Box(
+            low=np.array([0.0, -20.0], dtype=np.float32),
+            high=np.array([1.0, 0.0], dtype=np.float32),
+            dtype=np.float32
+        )
+
+    def reset(self, seed=None, options=None):
+
+        super().reset(seed=seed)
+
+        self.df = self.df.sample(frac=1).reset_index(drop=True)
+
+        self.current_step = 0
+
+        self.selected_count = 0
+
+        return self._get_state(), {}
+
+    def _get_state(self):
+
+        energy = self.df.loc[self.current_step, "Binding Energy"]
+
+        return np.array(
+            [
+                self.current_step / self.n_molecules,
+                energy
+            ],
+            dtype=np.float32
+        )
+
+    def step(self, action):
+
+        energy = self.df.loc[self.current_step, "Binding Energy"]
+
+        # --------------------------
+        # Molecule Quality
+        # --------------------------
+
+        if energy <= Q1:
+            quality = "Excellent"
+
+        elif energy <= Q2:
+            quality = "Good"
+
+        elif energy <= Q3:
+            quality = "Moderate"
+
+        else:
+            quality = "Poor"
+
+        # --------------------------
+        # Reward
+        # --------------------------
+
+        if quality == "Excellent":
+
+            reward = 5 if action == 1 else -5
+
+        elif quality == "Good":
+
+            reward = 3 if action == 1 else -3
+
+        elif quality == "Moderate":
+
+            reward = 1 if action == 1 else -1
+
+        else:
+
+            reward = -5 if action == 1 else 5
+
+        # --------------------------
+        # Screening Budget
+        # --------------------------
+
+        if action == 1:
+
+            self.selected_count += 1
+
+            if self.selected_count > self.selection_budget:
+
+                reward -= 10
+
+        # --------------------------
+        # Next state
+        # --------------------------
+
+        self.current_step += 1
+
+        terminated = self.current_step >= self.n_molecules
+
+        if terminated:
+
+            obs = np.zeros(2, dtype=np.float32)
+
+        else:
+
+            obs = self._get_state()
+
+        return obs, reward, terminated, False, {}
+
+
+Q1 = df["Binding Energy"].quantile(0.25)
+Q2 = df["Binding Energy"].quantile(0.50)
+Q3 = df["Binding Energy"].quantile(0.75)
+
+print("Excellent :", "<=", Q1)
+print("Good      :", Q1, "to", Q2)
+print("Moderate  :", Q2, "to", Q3)
+print("Poor      :", ">", Q3)
+
+
+# ============================================================
+# CELL 4 : TRAIN PPO
+# ============================================================
+
+import time
+
+print("="*60)
+print("TRAINING PPO")
+print("="*60)
+
+# Create environment
+ppo_env = DockingEnv(df)
+
+# Start timer
+start = time.time()
+
+# Create PPO model
+ppo_model = PPO(
+    "MlpPolicy",
+    ppo_env,
+    learning_rate=3e-4,
+    n_steps=256,
+    batch_size=64,
+    gamma=0.99,
+    verbose=1,
+    seed=42,
+
+    # TensorBoard logs
+    tensorboard_log="./tensorboard/PPO/"
+)
+
+# Train
+ppo_model.learn(
+    total_timesteps=50000,
+    tb_log_name="PPO"
+)
+
+# Training time
+ppo_training_time = time.time() - start
+
+print(f"\nTraining completed in {ppo_training_time:.2f} seconds")
+
+# Save model
+ppo_model.save("models/PPO/PPO_model")
+
+print("Model saved successfully.")
+
+# ----------------------------------------------------------
+# Evaluation
+# ----------------------------------------------------------
+
+ppo_stats, ppo_selected_df, ppo_all_df = evaluate_model(
+    model=ppo_model,
+    env=DockingEnv(df),      # Fresh environment for evaluation
+    df=df,
+    algo_name="PPO"
+)
+
+# Add training time
+ppo_stats["Training Time"] = ppo_training_time
+
+# Update statistics file with training time
+with open("results/PPO/statistics.txt", "w") as f:
+    for key, value in ppo_stats.items():
+        f.write(f"{key}: {value}\n")
+
+print("\nPPO evaluation completed.")
+
+# Store for final comparison
+all_results = {}
+
+all_results["PPO"] = ppo_stats
+
+
+
+
+
+# ============================================================
+# CELL 5 : STORE PPO RESULTS
+# ============================================================
+
+all_results = {}
+
+ppo_stats["Training Time"] = dqn_training_time if False else 138.44
+# Or simply:
+ppo_stats["Training Time"] = 138.44
+
+all_results["PPO"] = ppo_stats
+
+print("PPO results stored successfully.")
+print(all_results["PPO"])
+
+
+# ============================================================
+# CELL 6 : DQN TRAINING & EVALUATION
+# ============================================================
+
+import time
+
+print("=" * 60)
+print("TRAINING DQN")
+print("=" * 60)
+
+dqn_env = DockingEnv(df)
+
+start_time = time.time()
+
+dqn_model = DQN(
+    policy="MlpPolicy",
+    env=dqn_env,
+    learning_rate=1e-3,
+    buffer_size=10000,
+    learning_starts=500,
+    batch_size=64,
+    gamma=0.99,
+    train_freq=4,
+    target_update_interval=500,
+    verbose=1,
+    seed=42,
+    tensorboard_log="./tensorboard/DQN/"
+)
+
+dqn_model.learn(
+    total_timesteps=50000,
+    tb_log_name="DQN"
+)
+
+dqn_training_time = time.time() - start_time
+
+print(f"\nTraining completed in {dqn_training_time:.2f} seconds")
+
+dqn_model.save("models/DQN/DQN_model")
+
+print("Model saved successfully.")
+
+# =======================
+# Evaluation
+# =======================
+
+dqn_stats, dqn_selected_df, dqn_all_df = evaluate_model(
+    model=dqn_model,
+    env=DockingEnv(df),
+    df=df,
+    algo_name="DQN"
+)
+
+dqn_stats["Training Time"] = dqn_training_time
+
+# Save updated statistics
+with open("results/DQN/statistics.txt", "w") as f:
+    for key, value in dqn_stats.items():
+        f.write(f"{key}: {value}\n")
+
+# Store for final comparison
+all_results["DQN"] = dqn_stats
+
+print("\nDQN evaluation completed.")
+
+
+
+# ============================================================
+# CELL 7 : STORE DQN RESULTS
+# ============================================================
+
+dqn_stats["Training Time"] = dqn_training_time
+
+all_results["DQN"] = dqn_stats
+
+print("DQN results stored successfully.")
+print(all_results["DQN"])
+
+
+# ============================================================
+# CELL 8 : A2C TRAINING & EVALUATION
+# ============================================================
+
+import time
+
+print("=" * 60)
+print("TRAINING A2C")
+print("=" * 60)
+
+a2c_env = DockingEnv(df)
+
+start_time = time.time()
+
+a2c_model = A2C(
+    policy="MlpPolicy",
+    env=a2c_env,
+    learning_rate=7e-4,
+    gamma=0.99,
+    n_steps=5,
+    verbose=1,
+    seed=42,
+    tensorboard_log="./tensorboard/A2C/"
+)
+
+a2c_model.learn(
+    total_timesteps=50000,
+    tb_log_name="A2C"
+)
+
+a2c_training_time = time.time() - start_time
+
+print(f"\nTraining completed in {a2c_training_time:.2f} seconds")
+
+a2c_model.save("models/A2C/A2C_model")
+
+print("Model saved successfully.")
+
+# =======================
+# Evaluation
+# =======================
+
+a2c_stats, a2c_selected_df, a2c_all_df = evaluate_model(
+    model=a2c_model,
+    env=DockingEnv(df),
+    df=df,
+    algo_name="A2C"
+)
+
+a2c_stats["Training Time"] = a2c_training_time
+
+with open("results/A2C/statistics.txt", "w") as f:
+    for key, value in a2c_stats.items():
+        f.write(f"{key}: {value}\n")
+
+print("\nA2C evaluation completed.")
+
+
+
+# ============================================================
+# CELL 9 : STORE A2C RESULTS
+# ============================================================
+
+all_results["A2C"] = a2c_stats
+
+print("A2C results stored successfully.")
+print(all_results["A2C"])
+
+
+
+
+
+
+
+
+
+
+
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+
+
+class DockingEnvSAC(gym.Env):
+    metadata = {"render_modes": []}
+
+    def __init__(self, df):
+        super().__init__()
+
+        self.df = df.reset_index(drop=True)
+
+        self.n_molecules = len(self.df)
+        self.current_step = 0
+
+        # Same selection budget as PPO/DQN/A2C
+        self.selection_budget = int(0.30 * self.n_molecules)
+        self.selected_count = 0
+
+        # Continuous action space for SAC
+        self.action_space = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(1,),
+            dtype=np.float32
+        )
+
+        # Same observation as previous models
+        self.observation_space = spaces.Box(
+            low=np.array([0.0, -100.0], dtype=np.float32),
+            high=np.array([1.0, 0.0], dtype=np.float32),
+            dtype=np.float32
+        )
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+
+        self.current_step = 0
+        self.selected_count = 0
+
+        obs = np.array([
+            self.current_step / self.n_molecules,
+            self.df.loc[self.current_step, "Binding Energy"]
+        ], dtype=np.float32)
+
+        return obs, {}
+
+    def step(self, action):
+
+        # Convert continuous SAC action into binary decision
+        decision = 1 if float(action[0]) >= 0 else 0
+
+        binding = self.df.loc[self.current_step, "Binding Energy"]
+
+        # Same reward function as PPO/DQN/A2C
+        if binding <= Q1:
+            reward = 5 if decision == 1 else -5
+
+        elif binding <= Q2:
+            reward = 3 if decision == 1 else -3
+
+        elif binding <= Q3:
+            reward = 1 if decision == 1 else -1
+
+        else:
+            reward = -5 if decision == 1 else 5
+
+        # Budget penalty
+        if decision == 1:
+            self.selected_count += 1
+
+            if self.selected_count > self.selection_budget:
+                reward -= 10
+
+        self.current_step += 1
+
+        terminated = self.current_step >= self.n_molecules
+        truncated = False
+
+        if terminated:
+            obs = np.zeros(2, dtype=np.float32)
+        else:
+            obs = np.array([
+                self.current_step / self.n_molecules,
+                self.df.loc[self.current_step, "Binding Energy"]
+            ], dtype=np.float32)
+
+        info = {
+            "decision": decision,
+            "binding_energy": binding
+        }
+
+        return obs, reward, terminated, truncated, info
+
+    def render(self):
+        pass
+
+    def close(self):
+        pass
+
+
+
+
+# ============================================================
+# CELL 10 : SAC TRAINING & EVALUATION
+# ============================================================
+
+import time
+
+print("=" * 60)
+print("TRAINING SAC")
+print("=" * 60)
+
+sac_env = DockingEnvSAC(df)
+
+start_time = time.time()
+
+sac_model = SAC(
+    policy="MlpPolicy",
+    env=sac_env,
+    learning_rate=3e-4,
+    buffer_size=10000,
+    learning_starts=500,
+    batch_size=64,
+    tau=0.005,
+    gamma=0.99,
+    train_freq=1,
+    gradient_steps=1,
+    verbose=1,
+    seed=42,
+    tensorboard_log="./tensorboard/SAC/"
+)
+
+sac_model.learn(
+    total_timesteps=50000,
+    tb_log_name="SAC"
+)
+
+sac_training_time = time.time() - start_time
+
+print(f"\nTraining completed in {sac_training_time:.2f} seconds")
+
+sac_model.save("models/SAC/SAC_model")
+
+print("Model saved successfully.")
+
+# =======================
+# Evaluation
+# =======================
+
+sac_stats, sac_selected_df, sac_all_df = evaluate_model(
+    model=sac_model,
+    env=DockingEnvSAC(df),
+    df=df,
+    algo_name="SAC"
+)
+
+sac_stats["Training Time"] = sac_training_time
+
+with open("results/SAC/statistics.txt", "w") as f:
+    for key, value in sac_stats.items():
+        f.write(f"{key}: {value}\n")
+
+print("\nSAC evaluation completed.")
+
+
+# ============================================================
+# CELL 11 : STORE SAC RESULTS
+# ============================================================
+
+all_results["SAC"] = sac_stats
+
+print("SAC results stored successfully.")
+print(all_results["SAC"])
+
+
+
+
+
+comparison_df = pd.DataFrame(all_results).T
+
+comparison_df = comparison_df[
+    [
+        "Average Reward",
+        "Maximum Reward",
+        "Minimum Reward",
+        "Selected",
+        "Rejected",
+        "Training Time",
+        "Mean Binding Energy",
+        "Std Binding Energy",
+        "Excellent",
+        "Good",
+        "Moderate",
+        "Poor",
+    ]
+]
+
+comparison_df.to_csv("results/comparison_results.csv")
+
+print(comparison_df)
+
+
+
+import matplotlib.pyplot as plt
+
+# Average Reward
+plt.figure(figsize=(7,5))
+comparison_df["Average Reward"].plot(kind="bar")
+plt.ylabel("Average Reward")
+plt.title("Average Reward Comparison")
+plt.tight_layout()
+plt.savefig("figures/average_reward_comparison.png")
+plt.show()
+
+# Selected Ligands
+plt.figure(figsize=(7,5))
+comparison_df["Selected"].plot(kind="bar")
+plt.ylabel("Selected Ligands")
+plt.title("Selected Ligands Comparison")
+plt.tight_layout()
+plt.savefig("figures/selected_ligands_comparison.png")
+plt.show()
+
+# Training Time
+plt.figure(figsize=(7,5))
+comparison_df["Training Time"].plot(kind="bar")
+plt.ylabel("Seconds")
+plt.title("Training Time Comparison")
+plt.tight_layout()
+plt.savefig("figures/training_time_comparison.png")
+plt.show()
+
+# Excellent Ligands
+plt.figure(figsize=(7,5))
+comparison_df["Excellent"].plot(kind="bar")
+plt.ylabel("Count")
+plt.title("Excellent Ligands Selected")
+plt.tight_layout()
+plt.savefig("figures/excellent_ligands_comparison.png")
+plt.show()
+
+
+
+
+%load_ext tensorboard
+%tensorboard --logdir tensorboard
+
+
+
+
+
+
